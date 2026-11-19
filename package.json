@@ -1,0 +1,18 @@
+{
+  "name": "viec-cua-toi",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Việc của tôi – app quản lý công việc cá nhân, giao diện tử đằng và mèo tròn",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.45.4"
+  },
+  "devDependencies": {
+    "vite": "5.4.10"
+  }
+}
