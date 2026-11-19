@@ -24,12 +24,12 @@ END;
 $$;
 
 SELECT vault.create_secret(
-    'https://<PROJECT_REF>.supabase.co/functions/v1/viec-cua-toi-reminders',
+    'https://zjxeufyiuuiqftpllotz.supabase.co/functions/v1/viec-cua-toi-reminders',
     'viec_cua_toi_reminder_url',
     'URL Edge Function nhắc việc của app Việc của tôi'
 );
 SELECT vault.create_secret(
-    '<CHUOI_BI_MAT_GIONG_VIEC_CUA_TOI_CRON_SECRET>',
+    'ec27c2a74e3e4456b6312bd0f2cbd0cb0d26c1886ece41ad8a51f092a00668ef',
     'viec_cua_toi_cron_secret',
     'Chuỗi bí mật để cron gọi Edge Function nhắc việc'
 );
