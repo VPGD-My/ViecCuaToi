@@ -363,8 +363,11 @@
       <h3 id="sheetTitle">Việc mới</h3>
       <button class="txt-btn" id="closeSheet">Đóng</button>
     </div>
-    <input class="f-title" id="fTitle" placeholder="Cần làm gì?" maxlength="200" autocomplete="off">
-    <textarea class="f-note" id="fNote" placeholder="Ghi chú (không bắt buộc)"></textarea>
+    <label class="f-label" for="fTitle">Tên việc</label>
+    <input class="f-title" id="fTitle" placeholder="Ví dụ: Gửi báo cáo tuần" maxlength="200" autocomplete="off" enterkeyhint="done">
+    <p class="f-err" id="fTitleErr" hidden>Nhập tên việc trước nhé</p>
+    <label class="f-label" for="fNote">Ghi chú</label>
+    <textarea class="f-note" id="fNote" placeholder="Không bắt buộc"></textarea>
 
     <div class="field">
       <label class="lb">Thuộc nhóm</label>
@@ -405,7 +408,7 @@
   </div>
   <div class="sheet-foot">
     <button class="btn del" id="delBtn" hidden>Xoá</button>
-    <button class="btn primary" id="saveBtn" disabled>Lưu việc</button>
+    <button class="btn primary dim" id="saveBtn">Lưu việc</button>
   </div>
 </section>
 

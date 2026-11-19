@@ -2,6 +2,7 @@ import './style.css';
 import { configured, supabase, fetchTasks, fromRow, saveTask, softDeleteTasks, subscribeTasks, savePushSubscription, removePushSubscription, hasPushSubscription } from './store.js';
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY || '';
+const VAPID_KEY = VAPID_PUBLIC_KEY.replace(/[\s"']/g, '');
 const REMIND_BEFORE_MIN = import.meta.env.VITE_REMIND_BEFORE_MIN || '15';
 const MORNING_TIME = import.meta.env.VITE_MORNING_TIME || '07:30';
 (function(){
@@ -276,14 +277,31 @@ const MORNING_TIME = import.meta.env.VITE_MORNING_TIME || '07:30';
     }
     const perm = await Notification.requestPermission();
     if(perm !== "granted"){ toast("Chưa bật nhắc việc vì chưa được cho phép thông báo."); renderBell(); return; }
+    let step = "sw";
     try{
       const reg = swReg || await registerSW();
+      if(!reg) throw new Error("Không đăng ký được service worker");
+      step = "key";
+      const key = b64ToUint8(VAPID_KEY);
+      if(key.length !== 65 || key[0] !== 4) throw new Error("Khoá VAPID public không hợp lệ (độ dài "+key.length+")");
+      step = "subscribe";
       let sub = await reg.pushManager.getSubscription();
-      if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToUint8(VAPID_PUBLIC_KEY) });
+      // Máy từng đăng ký bằng khoá cũ: huỷ rồi đăng ký lại bằng khoá hiện tại
+      if(sub && sub.options && sub.options.applicationServerKey){
+        const cur = new Uint8Array(sub.options.applicationServerKey);
+        if(cur.length !== key.length || cur.some((b,i)=>b!==key[i])){ await sub.unsubscribe(); sub = null; }
+      }
+      if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      step = "save";
       await savePushSubscription(sub, userId);
       pushOn = true; renderBell();
       toast("Đã bật nhắc việc. "+remindRuleText());
-    }catch(e){ console.error(e); toast("Chưa bật được nhắc việc, thử lại sau nhé."); }
+    }catch(e){
+      console.error(e);
+      const where = { sw:"bước 1 (service worker)", key:"bước 2 (khoá VAPID)", subscribe:"bước 3 (đăng ký với điện thoại)", save:"bước 4 (lưu lên Supabase)" }[step];
+      const detail = (e && (e.message || e.code || e.name)) ? String(e.message || e.code || e.name).slice(0,140) : "";
+      toast("Chưa bật được nhắc việc, lỗi ở "+where+(detail ? ": "+detail : ""), null, 12000);
+    }
   }
   async function disablePush(silent){
     try{
@@ -441,14 +459,14 @@ const MORNING_TIME = import.meta.env.VITE_MORNING_TIME || '07:30';
   }
 
   let toastTimer;
-  function toast(msg, undo){
+  function toast(msg, undo, ms){
     $("#toastMsg").textContent = msg;
     const u = $("#toastUndo");
     u.hidden = !undo;
     u.onclick = ()=>{ $("#toast").classList.remove("on"); undo && undo(); };
     $("#toast").classList.add("on");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(()=>$("#toast").classList.remove("on"), 3800);
+    toastTimer = setTimeout(()=>$("#toast").classList.remove("on"), ms || 3800);
   }
 
   /* ---------- sheet ---------- */
@@ -457,6 +475,7 @@ const MORNING_TIME = import.meta.env.VITE_MORNING_TIME || '07:30';
     editing = task ? JSON.parse(JSON.stringify(task)) : {id:null, title:"", note:"", space:def, due:"", time:"", priority:2, subtasks:[], done:false};
     $("#sheetTitle").textContent = task ? "Sửa việc" : "Việc mới";
     $("#fTitle").value = editing.title;
+    $("#fTitleErr").hidden = true;
     $("#fNote").value = editing.note||"";
     $("#fDate").value = editing.due||"";
     $("#fTime").value = editing.time||"";
@@ -464,11 +483,39 @@ const MORNING_TIME = import.meta.env.VITE_MORNING_TIME || '07:30';
     $("#saveBtn").textContent = task ? "Lưu thay đổi" : "Lưu việc";
     syncSheet();
     renderSubs();
+    lockPage(true);
     $("#scrim").classList.add("on");
     $("#sheet").classList.add("on");
-    setTimeout(()=>{ if(!task) $("#fTitle").focus(); }, 220);
+    // Trên điện thoại không tự bật bàn phím, tránh bảng bị đẩy lên xuống
+    if(!task && !window.matchMedia("(pointer: coarse)").matches) setTimeout(()=>$("#fTitle").focus(), 220);
+  }
+  let lockedY = 0;
+  function lockPage(on){
+    const framed = getComputedStyle($("#scroller")).display !== "contents";
+    const root = document.documentElement, body = document.body;
+    if(on){
+      root.classList.add("sheet-open");
+      if(!framed){ lockedY = window.scrollY; body.classList.add("lock"); body.style.top = (-lockedY)+"px"; }
+    } else {
+      root.classList.remove("sheet-open");
+      if(body.classList.contains("lock")){ body.classList.remove("lock"); body.style.top = ""; window.scrollTo(0, lockedY); }
+    }
+  }
+  // iPhone: khi bàn phím bật, giữ bảng nằm ngay trên bàn phím thay vì để trang trôi
+  function fitSheetToKeyboard(){
+    const vv = window.visualViewport, sh = $("#sheet");
+    if(!vv || !sh.classList.contains("on") || getComputedStyle($("#scroller")).display !== "contents"){ sh.style.bottom = ""; sh.style.maxHeight = ""; return; }
+    const hidden = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    sh.style.bottom = hidden + "px";
+    sh.style.maxHeight = Math.round(vv.height * 0.92) + "px";
+  }
+  if(window.visualViewport){
+    window.visualViewport.addEventListener("resize", fitSheetToKeyboard);
+    window.visualViewport.addEventListener("scroll", fitSheetToKeyboard);
   }
   function closeSheet(){
+    lockPage(false);
+    $("#sheet").style.bottom = ""; $("#sheet").style.maxHeight = "";
     $("#scrim").classList.remove("on");
     $("#sheet").classList.remove("on");
     editing = null;
@@ -484,7 +531,7 @@ const MORNING_TIME = import.meta.env.VITE_MORNING_TIME || '07:30';
     $("#fDate").value = editing.due||"";
     $("#fTime").disabled = !editing.due;
     document.body.dataset.space = editing.space;
-    $("#saveBtn").disabled = !$("#fTitle").value.trim();
+    setSaveState();
   }
   function nextMonday(){ const d = new Date(); const add = ((8 - d.getDay()) % 7) || 7; return iso(addDays(d, add)); }
   function renderSubs(){
@@ -507,7 +554,14 @@ const MORNING_TIME = import.meta.env.VITE_MORNING_TIME || '07:30';
   }
   async function saveSheet(){
     if(!editing) return;
-    const title = $("#fTitle").value.trim(); if(!title) return;
+    const title = $("#fTitle").value.trim();
+    if(!title){
+      const inp = $("#fTitle");
+      $("#fTitleErr").hidden = false;
+      inp.classList.remove("shake"); void inp.offsetWidth; inp.classList.add("shake");
+      inp.focus();
+      return;
+    }
     const isNew = !editing.id;
     const t = Object.assign({}, editing, {
       title, note:$("#fNote").value.trim(),
@@ -541,7 +595,12 @@ const MORNING_TIME = import.meta.env.VITE_MORNING_TIME || '07:30';
   $("#saveBtn").onclick = saveSheet;
   $("#delBtn").onclick = deleteFromSheet;
   $("#addSub").onclick = addSubStep;
-  $("#fTitle").oninput = ()=>{ $("#saveBtn").disabled = !$("#fTitle").value.trim(); };
+  function setSaveState(){
+    const has = !!$("#fTitle").value.trim();
+    $("#saveBtn").classList.toggle("dim", !has);
+    if(has) $("#fTitleErr").hidden = true;
+  }
+  $("#fTitle").oninput = setSaveState;
   $("#fTitle").onkeydown = e=>{ if(e.key==="Enter"){ e.preventDefault(); saveSheet(); } };
   $("#fSpace").onclick = e=>{ const c=e.target.closest(".chip"); if(!c) return; editing.space=c.dataset.v; syncSheet(); };
   $("#fPrio").onclick = e=>{ const c=e.target.closest(".chip"); if(!c) return; editing.priority=Number(c.dataset.v); syncSheet(); };
